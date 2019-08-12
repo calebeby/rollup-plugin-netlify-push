@@ -12,8 +12,12 @@ export interface Route {
 
 interface Opts {
   getRoutes: () => Promise<Route[]> | Route[]
-  from: string
+  /** Path to resolve modules from */
+  resolveFrom: string
+  /** Headers which should be included for every route */
   everyRouteHeaders?: string[]
+  /** Modules (and their dependencies) which should be included for every route */
+  everyRouteModules?: string[]
 }
 
 type Output = OutputChunk | OutputAsset
@@ -21,13 +25,10 @@ type Output = OutputChunk | OutputAsset
 const isChunk = (output: Output): output is OutputChunk =>
   !(output as OutputAsset).isAsset
 
-const isDynamicEntry = (output: Output): output is OutputChunk =>
-  isChunk(output) && output.isDynamicEntry
+const isEntry = (output: Output): output is OutputChunk =>
+  isChunk(output) && (output.isDynamicEntry || output.isEntry)
 
-const getChunkDeps = (chunk: OutputChunk) => [
-  ...chunk.dynamicImports,
-  ...chunk.imports,
-]
+const getChunkDeps = (chunk: OutputChunk) => chunk.imports
 
 interface LinkOpts {
   path: string
@@ -56,6 +57,7 @@ export const printPush = ({
 }) => printLink({ path, as, crossOrigin, rel: 'preload' })
 
 const netlifyPush = (opts: Opts): Plugin => {
+  const { everyRouteModules = [] } = opts
   const routesPromise = opts.getRoutes()
   return {
     name: 'rollup-plugin-netlify-push',
@@ -65,32 +67,52 @@ const netlifyPush = (opts: Opts): Plugin => {
       const routes = await routesPromise
       if (!Array.isArray(routes))
         throw new Error('getRoutes must resolve to an array')
-      const dynamicEntryChunks = Object.values(bundle).filter(isDynamicEntry)
+      const entryChunks = Object.values(bundle).filter(isEntry)
+
+      const getChunkDepsRecursive = (
+        chunk: OutputChunk,
+        depsSet = new Set<OutputChunk>(),
+      ) => {
+        depsSet.add(chunk)
+        getChunkDeps(chunk).forEach(dep => {
+          const depChunk = bundle[dep]
+          if (isChunk(depChunk) && !depsSet.has(depChunk))
+            getChunkDepsRecursive(depChunk, depsSet)
+        })
+        return depsSet
+      }
+
+      const everyRouteChunks = (await Promise.all(
+        everyRouteModules.map(async path => {
+          const resolved = await this.resolve(path, opts.resolveFrom)
+          if (!resolved) throw new Error(`Could not resolve ${path}`)
+          if (resolved.external)
+            throw new Error(`Routes must not be external imports for ${path}`)
+          const resolvedPath = resolved.id
+          const moduleChunk = entryChunks.find(
+            c => c.facadeModuleId === resolvedPath,
+          )
+          if (!moduleChunk)
+            throw new Error(`Could not find chunk for ${resolvedPath}`)
+          return [...getChunkDepsRecursive(moduleChunk)]
+        }),
+      )).flat()
 
       const printRouteHeaders = async (route: Route) => {
         const headers = new Set<string>(opts.everyRouteHeaders)
-        const resolved = await this.resolve(route.filePath, opts.from)
-        if (!resolved || resolved.external)
-          throw new Error('Routes must not be external imports')
+        const resolved = await this.resolve(route.filePath, opts.resolveFrom)
+        if (!resolved) throw new Error(`Could not resolve ${route.filePath}`)
+        if (resolved.external)
+          throw new Error(`Routes must not be external imports for ${route}`)
         const resolvedPath = resolved.id
-        const entryChunk = dynamicEntryChunks.find(
+        const entryChunk = entryChunks.find(
           c => c.facadeModuleId === resolvedPath,
         )
         if (!entryChunk)
           throw new Error(`Could not find entry chunk for ${resolvedPath}`)
-        const getChunkDepsRecursive = (
-          chunk: OutputChunk,
-          depsSet = new Set<OutputChunk>(),
-        ) => {
-          depsSet.add(chunk)
-          getChunkDeps(chunk).forEach(dep => {
-            const depChunk = bundle[dep]
-            if (isChunk(depChunk) && !depsSet.has(depChunk))
-              getChunkDepsRecursive(depChunk, depsSet)
-          })
-          return depsSet
-        }
-        const routeChunks = getChunkDepsRecursive(entryChunk)
+        const routeChunks = Array.from(
+          new Set([...everyRouteChunks, ...getChunkDepsRecursive(entryChunk)]),
+        )
         routeChunks.forEach(chunk =>
           headers.add(
             printPush({
