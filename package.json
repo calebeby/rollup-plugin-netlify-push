@@ -1,10 +1,11 @@
 {
   "name": "rollup-plugin-netlify-push",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "main": "dist/main/index.js",
   "types": "dist/main/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "parse-routes/package.json"
   ],
   "scripts": {
     "start": "tsc --watch",
