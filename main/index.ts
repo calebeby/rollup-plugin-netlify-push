@@ -23,7 +23,7 @@ interface Opts {
 type Output = OutputChunk | OutputAsset
 
 const isChunk = (output: Output): output is OutputChunk =>
-  !(output as OutputAsset).isAsset
+  output.type === 'chunk'
 
 const isEntry = (output: Output): output is OutputChunk =>
   isChunk(output) && (output.isDynamicEntry || output.isEntry)

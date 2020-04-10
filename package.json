@@ -8,11 +8,11 @@
     "parse-routes/package.json"
   ],
   "scripts": {
-    "start": "tsc --watch",
+    "build:watch": "tsc --watch",
     "build": "tsc"
   },
   "peerDependencies": {
-    "rollup": "^1"
+    "rollup": "^2"
   },
   "prettier": {
     "singleQuote": true,
@@ -21,8 +21,9 @@
   },
   "devDependencies": {
     "@types/babel__core": "^7.1.2",
+    "@types/node": "^13.11.1",
     "prettier": "^1.18.2",
-    "rollup": "^1.16.7",
+    "rollup": "^2.4.0",
     "typescript": "^3.5.3"
   },
   "dependencies": {
